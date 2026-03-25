@@ -1,0 +1,16 @@
+services:
+  vpn-test:
+    build: .
+    container_name: vpn-test
+    privileged: true
+    tmpfs:
+      - /run
+      - /run/lock
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      - ./setup.sh:/root/setup.sh:ro
+    cgroup: host
+    ports:
+      - "1081:1081"
+      - "10443:10443"
+      - "4443:443/udp"
