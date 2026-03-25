@@ -351,6 +351,12 @@ setup_unbound() {
     # Download root hints
     curl -sS -o /var/lib/unbound/root.hints https://www.internic.net/domain/named.root
 
+    # Generate root trust anchor if missing (required by default unbound config)
+    if [[ ! -f /var/lib/unbound/root.key ]]; then
+        unbound-anchor -a /var/lib/unbound/root.key 2>/dev/null || true
+        chown unbound:unbound /var/lib/unbound/root.key 2>/dev/null || true
+    fi
+
     cat > /etc/unbound/unbound.conf.d/resolver.conf <<'UNBOUND_EOF'
 server:
     interface: 127.0.0.1
