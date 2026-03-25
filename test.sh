@@ -63,10 +63,12 @@ syntax_test() {
 
     # Bash syntax check
     assert "setup.sh has valid bash syntax" bash -n setup.sh
+    assert "vpn-users.sh has valid bash syntax" bash -n web/vpn-users.sh
 
     # Check shellcheck if available
     if command -v shellcheck &>/dev/null; then
         assert "setup.sh passes shellcheck" shellcheck -S warning setup.sh
+        assert "vpn-users.sh passes shellcheck" shellcheck -S warning web/vpn-users.sh
     else
         log_warn "shellcheck not installed, skipping"
     fi
@@ -160,6 +162,60 @@ integration_test() {
 
     assert_output_contains "SOCKS port 1081 is listening" "$listening" ":1081"
     assert_output_contains "VLESS port 10443 is listening" "$listening" ":10443"
+
+    # ── Web UI tests ─────────────────────────────────────────────────────
+    log_info "Running Web UI assertions..."
+
+    assert "vpn-users.sh is installed" \
+        docker exec "$CONTAINER_NAME" test -x /opt/vpn-admin/vpn-users.sh
+
+    assert "vpn-admin.py is installed" \
+        docker exec "$CONTAINER_NAME" test -f /opt/vpn-admin/vpn-admin.py
+
+    assert "users directory exists" \
+        docker exec "$CONTAINER_NAME" test -d /etc/sing-box/users
+
+    assert "default user file exists" \
+        docker exec "$CONTAINER_NAME" test -f /etc/sing-box/users/default.json
+
+    assert "admin password file exists" \
+        docker exec "$CONTAINER_NAME" test -f /etc/sing-box/.admin-password
+
+    assert "vpn-admin service is active" \
+        docker exec "$CONTAINER_NAME" systemctl is-active --quiet vpn-admin
+
+    assert_output_contains "Web UI port 8443 is listening" "$listening" ":8443"
+
+    assert_output_contains "output contains Admin Web UI URL" "$setup_output" "https://"
+
+    # Test user management operations
+    log_info "Testing user management..."
+
+    assert "vpn-users add testclient works" \
+        docker exec "$CONTAINER_NAME" /opt/vpn-admin/vpn-users.sh add testclient
+
+    assert "testclient user file created" \
+        docker exec "$CONTAINER_NAME" test -f /etc/sing-box/users/testclient.json
+
+    assert "config is valid after adding user" \
+        docker exec "$CONTAINER_NAME" sing-box check -c /etc/sing-box/config.json
+
+    local list_output
+    list_output=$(docker exec "$CONTAINER_NAME" /opt/vpn-admin/vpn-users.sh list)
+    assert_output_contains "list shows default user" "$list_output" "default"
+    assert_output_contains "list shows testclient" "$list_output" "testclient"
+
+    assert "vpn-users urls testclient works" \
+        docker exec "$CONTAINER_NAME" /opt/vpn-admin/vpn-users.sh urls testclient
+
+    assert "vpn-users remove testclient works" \
+        docker exec "$CONTAINER_NAME" /opt/vpn-admin/vpn-users.sh remove testclient
+
+    assert "testclient user file removed" \
+        docker exec "$CONTAINER_NAME" test ! -f /etc/sing-box/users/testclient.json
+
+    assert "config is valid after removing user" \
+        docker exec "$CONTAINER_NAME" sing-box check -c /etc/sing-box/config.json
 
     echo ""
     echo -e "${BOLD}═══════════════════════════════════════════════════${NC}"

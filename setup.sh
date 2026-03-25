@@ -61,6 +61,8 @@ install_dependencies() {
     command_exists curl    || deps+=(curl)
     command_exists openssl || deps+=(openssl)
     command_exists ip      || deps+=(iproute2)
+    command_exists jq      || deps+=(jq)
+    command_exists python3 || deps+=(python3)
 
     if [[ ${#deps[@]} -gt 0 ]]; then
         log_info "Installing missing dependencies: ${deps[*]}"
@@ -86,6 +88,7 @@ HY2_UP_MBPS=100
 HY2_DOWN_MBPS=100
 SKIP_HARDENING=false
 SKIP_CERTBOT=false
+SKIP_WEBUI=false
 DRY_RUN=false
 SHOW_URLS=false
 
@@ -108,6 +111,7 @@ parse_args() {
             --hy2-bandwidth)  HY2_UP_MBPS="$2"; HY2_DOWN_MBPS="$2"; shift 2 ;;
             --skip-hardening) SKIP_HARDENING=true; shift ;;
             --skip-certbot)   SKIP_CERTBOT=true; shift ;;
+            --skip-webui)     SKIP_WEBUI=true; shift ;;
             --dry-run)        DRY_RUN=true; shift ;;
             --show-urls)      SHOW_URLS=true; shift ;;
             --help|-h)        usage; exit 0 ;;
@@ -172,6 +176,7 @@ Optional:
   --hy2-bandwidth NUM       Up/down Mbps for Hysteria2 (default: 100)
   --skip-hardening          Skip server hardening phase
   --skip-certbot            Skip TLS certificate issuance
+  --skip-webui              Skip web UI installation
   --dry-run                 Show what would be done without executing
   --show-urls               Show current client URLs from saved secrets
   --help, -h                Show this help message
@@ -624,6 +629,7 @@ PREHOOK_EOF
 #!/bin/bash
 ufw delete allow 80/tcp
 systemctl reload sing-box 2>/dev/null || true
+systemctl restart vpn-admin 2>/dev/null || true
 POSTHOOK_EOF
 
     chmod +x /etc/letsencrypt/renewal-hooks/pre/open-port-80.sh
@@ -935,7 +941,143 @@ F2B_JAILS_EOF
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 8. SAVE SECRETS & PRINT OUTPUT
+# 8. WEB UI
+# ─────────────────────────────────────────────────────────────────────────────
+
+setup_web_ui() {
+    log_step "Installing VPN Admin Web UI"
+
+    local base_url="https://raw.githubusercontent.com/sxwebdev/setup-vpn-server/refs/heads/master"
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+    mkdir -p /opt/vpn-admin /etc/sing-box/users /var/log/vpn-admin
+
+    # Install vpn-users.sh — prefer local copy, fallback to GitHub
+    if [[ -f "${script_dir}/web/vpn-users.sh" ]]; then
+        cp "${script_dir}/web/vpn-users.sh" /opt/vpn-admin/vpn-users.sh
+    else
+        log_info "Downloading vpn-users.sh from GitHub..."
+        curl -fsSL "${base_url}/web/vpn-users.sh" -o /opt/vpn-admin/vpn-users.sh \
+            || die "Failed to download vpn-users.sh"
+    fi
+
+    # Install vpn-admin.py — prefer local copy, fallback to GitHub
+    if [[ -f "${script_dir}/web/vpn-admin.py" ]]; then
+        cp "${script_dir}/web/vpn-admin.py" /opt/vpn-admin/vpn-admin.py
+    else
+        log_info "Downloading vpn-admin.py from GitHub..."
+        curl -fsSL "${base_url}/web/vpn-admin.py" -o /opt/vpn-admin/vpn-admin.py \
+            || die "Failed to download vpn-admin.py"
+    fi
+
+    chmod 755 /opt/vpn-admin/vpn-users.sh
+    chmod 644 /opt/vpn-admin/vpn-admin.py
+    chmod 700 /etc/sing-box/users
+
+    log_ok "Scripts installed to /opt/vpn-admin/"
+
+    # Generate admin password
+    log_step "Generating admin password for Web UI"
+    ADMIN_PASSWORD=$(openssl rand -base64 18)
+    local salt
+    salt=$(openssl rand -hex 16)
+    local hash
+    hash=$(printf '%s' "${salt}${ADMIN_PASSWORD}" | sha256sum | awk '{print $1}')
+    echo "${salt}:${hash}" > /etc/sing-box/.admin-password
+    chmod 600 /etc/sing-box/.admin-password
+    log_ok "Admin password generated"
+
+    # Migrate initial user to user management system
+    log_step "Migrating initial user to user management"
+    if [[ ! -f /etc/sing-box/users/default.json ]]; then
+        local created
+        created=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+        jq -n \
+            --arg name "default" \
+            --arg uuid "$UUID" \
+            --arg socks_pass "$SOCKS_PASS" \
+            --arg hy2_pass "$HY2_PASS" \
+            --arg created "$created" \
+            '{
+                name: $name,
+                created: $created,
+                vless_uuid: $uuid,
+                socks_password: $socks_pass,
+                hy2_password: $hy2_pass
+            }' > /etc/sing-box/users/default.json
+        chmod 600 /etc/sing-box/users/default.json
+        log_ok "Initial user migrated as 'default'"
+    else
+        log_warn "Default user already exists, skipping migration"
+    fi
+
+    # Open firewall port
+    if command_exists ufw; then
+        ufw allow 8443/tcp comment "VPN Admin Web UI"
+        log_ok "Firewall port 8443/tcp opened"
+    fi
+
+    # Install systemd service
+    cat > /etc/systemd/system/vpn-admin.service <<'UNIT_EOF'
+[Unit]
+Description=VPN Admin Web UI
+After=network.target sing-box.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/vpn-admin/vpn-admin.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+
+    systemctl daemon-reload
+    systemctl enable --now vpn-admin
+
+    sleep 2
+
+    if systemctl is-active --quiet vpn-admin; then
+        log_ok "VPN Admin Web UI is running on port 8443"
+    else
+        log_error "VPN Admin Web UI failed to start. Check logs:"
+        journalctl -u vpn-admin --no-pager -n 20
+        log_warn "Continuing without Web UI..."
+        return
+    fi
+
+    # Setup fail2ban for Web UI
+    if command_exists fail2ban-client; then
+        cat > /etc/fail2ban/filter.d/vpn-admin.conf <<'F2B_ADMIN_EOF'
+[Definition]
+failregex = ^.*AUTH_FAILURE from <HOST>:.*$
+ignoreregex =
+F2B_ADMIN_EOF
+
+        cat > /etc/fail2ban/jail.d/vpn-admin.conf <<'F2B_JAIL_EOF'
+[vpn-admin]
+enabled  = true
+filter   = vpn-admin
+logpath  = /var/log/vpn-admin/vpn-admin.log
+backend  = auto
+maxretry = 5
+findtime = 10m
+bantime  = 1h
+port     = 8443
+action   = ufw
+F2B_JAIL_EOF
+
+        systemctl restart fail2ban
+        log_ok "fail2ban configured for Web UI"
+    fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 9. SAVE SECRETS & PRINT OUTPUT
 # ─────────────────────────────────────────────────────────────────────────────
 
 save_secrets() {
@@ -1015,6 +1157,14 @@ print_credentials() {
     echo -e "  ssh ${USERNAME}@${SERVER_IP}"
     echo ""
 
+    if [[ -n "${ADMIN_PASSWORD:-}" ]]; then
+        echo -e "${CYAN}${BOLD}  Admin Web UI${NC}"
+        echo -e "  ${BOLD}URL:${NC}      https://${DOMAIN}:8443"
+        echo -e "  ${BOLD}Username:${NC} admin"
+        echo -e "  ${BOLD}Password:${NC} ${ADMIN_PASSWORD}"
+        echo ""
+    fi
+
     echo -e "${YELLOW}${BOLD}  Secrets file:${NC} /etc/sing-box/.secrets"
     echo -e "${YELLOW}${BOLD}  View again:${NC}   sudo cat /etc/sing-box/.secrets"
     echo ""
@@ -1027,7 +1177,7 @@ print_credentials() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 9. MAIN
+# 10. MAIN
 # ─────────────────────────────────────────────────────────────────────────────
 
 main() {
@@ -1092,8 +1242,17 @@ main() {
     log_info "=== Phase 4: Proxy Protection ==="
     setup_proxy_fail2ban
 
-    log_info "=== Phase 5: Done! ==="
+    log_info "=== Phase 5: Save Secrets ==="
     save_secrets
+
+    if [[ "$SKIP_WEBUI" != "true" ]]; then
+        log_info "=== Phase 6: Web UI ==="
+        setup_web_ui
+    else
+        log_warn "Skipping Web UI installation (--skip-webui)"
+    fi
+
+    log_info "=== Done! ==="
     print_credentials
 }
 

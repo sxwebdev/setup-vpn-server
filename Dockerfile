@@ -13,6 +13,8 @@ RUN apt-get update && apt-get install -y \
     iproute2 \
     sudo \
     ca-certificates \
+    python3 \
+    jq \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -25,8 +27,9 @@ RUN rm -f /lib/systemd/system/multi-user.target.wants/* \
     /lib/systemd/system/sysinit.target.wants/systemd-tmpfiles-setup* \
     /lib/systemd/system/systemd-update-utmp*
 
-# Copy setup script
+# Copy setup script and web UI files
 COPY setup.sh /root/setup.sh
+COPY web/ /root/web/
 RUN chmod +x /root/setup.sh
 
 VOLUME ["/sys/fs/cgroup"]
