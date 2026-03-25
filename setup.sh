@@ -78,7 +78,7 @@ DOMAIN=""
 EMAIL=""
 USERNAME=""
 SSH_PUBLIC_KEY=""
-REALITY_SNI="www.google.com"
+REALITY_SNI="github.com"
 SOCKS_PORT=1081
 VLESS_PORT=10443
 HY2_PORT=443
@@ -87,6 +87,7 @@ HY2_DOWN_MBPS=100
 SKIP_HARDENING=false
 SKIP_CERTBOT=false
 DRY_RUN=false
+SHOW_URLS=false
 
 parse_args() {
     while [[ $# -gt 0 ]]; do
@@ -108,6 +109,7 @@ parse_args() {
             --skip-hardening) SKIP_HARDENING=true; shift ;;
             --skip-certbot)   SKIP_CERTBOT=true; shift ;;
             --dry-run)        DRY_RUN=true; shift ;;
+            --show-urls)      SHOW_URLS=true; shift ;;
             --help|-h)        usage; exit 0 ;;
             *) die "Unknown argument: $1" ;;
         esac
@@ -120,7 +122,7 @@ load_env_defaults() {
     EMAIL="${EMAIL:-${SETUP_EMAIL:-}}"
     USERNAME="${USERNAME:-${SETUP_USERNAME:-}}"
     SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY:-${SETUP_SSH_PUBLIC_KEY:-}}"
-    REALITY_SNI="${REALITY_SNI:-${SETUP_REALITY_SNI:-www.google.com}}"
+    REALITY_SNI="${REALITY_SNI:-${SETUP_REALITY_SNI:-github.com}}"
 }
 
 validate_args() {
@@ -163,7 +165,7 @@ Required:
   --ssh-key-file PATH       Path to SSH public key file
 
 Optional:
-  --reality-sni HOST        Domain to impersonate for Reality (default: www.google.com)
+  --reality-sni HOST        Domain to impersonate for Reality (default: github.com)
   --socks-port PORT         SOCKS5 port (default: 1081)
   --vless-port PORT         VLESS Reality port (default: 10443)
   --hy2-port PORT           Hysteria2 UDP port (default: 443)
@@ -171,6 +173,7 @@ Optional:
   --skip-hardening          Skip server hardening phase
   --skip-certbot            Skip TLS certificate issuance
   --dry-run                 Show what would be done without executing
+  --show-urls               Show current client URLs from saved secrets
   --help, -h                Show this help message
 
 Examples:
@@ -1040,6 +1043,19 @@ main() {
     install_dependencies
     load_env_defaults
     parse_args "$@"
+
+    # --show-urls: just print current URLs from saved secrets
+    if [[ "$SHOW_URLS" == "true" ]]; then
+        if [[ ! -f /etc/sing-box/.secrets ]]; then
+            die "No secrets file found. Run setup first."
+        fi
+        # shellcheck disable=SC1091
+        source /etc/sing-box/.secrets
+        detect_server_ip
+        print_credentials
+        exit 0
+    fi
+
     validate_args
     detect_server_ip
     generate_secrets
