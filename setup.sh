@@ -295,6 +295,9 @@ ClientAliveInterval 300
 ClientAliveCountMax 2
 SSHD_EOF
 
+    # Ensure privilege separation directory exists
+    mkdir -p /run/sshd
+
     # Verify config before restarting
     sshd -t || die "SSH config validation failed! Restoring backup."
 
