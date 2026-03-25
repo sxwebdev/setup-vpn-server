@@ -200,6 +200,14 @@ detect_server_ip() {
 generate_secrets() {
     log_step "Generating secrets"
 
+    # Reuse existing secrets if available (idempotent re-runs)
+    if [[ -f /etc/sing-box/.secrets ]]; then
+        log_warn "Existing secrets found, reusing them"
+        # shellcheck disable=SC1091
+        source /etc/sing-box/.secrets
+        return
+    fi
+
     if command_exists uuidgen; then
         UUID=$(uuidgen)
     elif command_exists sing-box; then
@@ -351,11 +359,13 @@ setup_unbound() {
     # Download root hints
     curl -sS -o /var/lib/unbound/root.hints https://www.internic.net/domain/named.root
 
-    # Generate root trust anchor if missing (required by default unbound config)
-    if [[ ! -f /var/lib/unbound/root.key ]]; then
-        unbound-anchor -a /var/lib/unbound/root.key 2>/dev/null || true
-        chown unbound:unbound /var/lib/unbound/root.key 2>/dev/null || true
-    fi
+    # Replace default unbound config that references DNSSEC trust anchor
+    # (auto-trust-anchor-file requires root.key which may not exist yet)
+    cat > /etc/unbound/unbound.conf <<'MAIN_EOF'
+# Managed by setup-vpn-server
+include: "/etc/unbound/unbound.conf.d/*.conf"
+MAIN_EOF
+    rm -f /etc/unbound/unbound.conf.d/root-auto-trust-anchor-file.conf
 
     cat > /etc/unbound/unbound.conf.d/resolver.conf <<'UNBOUND_EOF'
 server:
@@ -419,12 +429,14 @@ RESOLVED_EOF
     systemctl restart systemd-resolved
 
     # Fix resolv.conf symlink if needed
-    if [[ -L /etc/resolv.conf ]]; then
-        rm -f /etc/resolv.conf
+    if ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf 2>/dev/null; then
+        log_ok "System DNS pointing to local unbound"
+    else
+        # In containers, /etc/resolv.conf may be mounted and immutable
+        log_warn "Could not update /etc/resolv.conf (may be container-mounted), writing nameserver directly"
+        echo "nameserver 127.0.0.1" > /etc/resolv.conf 2>/dev/null || true
+        log_ok "System DNS configured"
     fi
-    ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
-
-    log_ok "System DNS pointing to local unbound"
 }
 
 enable_bbr() {
@@ -602,6 +614,12 @@ setup_cert_symlinks() {
 
 generate_reality_keypair() {
     log_step "Generating Reality keypair"
+
+    # Skip if already loaded from existing secrets
+    if [[ -n "${REALITY_PRIVATE_KEY:-}" && -n "${REALITY_PUBLIC_KEY:-}" ]]; then
+        log_warn "Reality keypair already exists, reusing"
+        return
+    fi
 
     local output
     output=$(sing-box generate reality-keypair)
@@ -852,8 +870,8 @@ failregex = ^ERROR .*inbound/vless\[vless-reality\]: process connection from <HO
 ignoreregex =
 F2B_VLESS_EOF
 
-    # Add proxy jails
-    cat >> /etc/fail2ban/jail.local <<F2B_JAILS_EOF
+    # Write proxy jails (separate file to avoid duplicates on re-run)
+    cat > /etc/fail2ban/jail.d/singbox.conf <<F2B_JAILS_EOF
 
 [singbox-socks]
 enabled  = true
