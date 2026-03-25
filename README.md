@@ -21,7 +21,7 @@ Server hardening included:
 SSH into your fresh Ubuntu VPS and run:
 
 ```bash
-curl -sL https://raw.githubusercontent.com/sxwebdev/setup-vpn-server/main/setup.sh -o setup.sh
+curl -sL https://raw.githubusercontent.com/sxwebdev/setup-vpn-server/refs/heads/master/setup.sh -o setup.sh
 
 sudo bash setup.sh \
   --domain vpn.example.com \
