@@ -1,5 +1,7 @@
 # setup-vpn-server
 
+![Web Admin UI](screenshots/webui.png)
+
 Automated deployment of a personal proxy server with [sing-box](https://sing-box.sagernet.org/) on Ubuntu.
 
 Protocols configured:
@@ -15,6 +17,8 @@ Server hardening included:
 - fail2ban for SSH, SOCKS, and VLESS
 - Local DNS resolver (unbound)
 - BBR TCP congestion control
+
+**Web Admin UI** — manage VPN users from the browser (add, remove, view connection URLs with QR codes). No SSH required.
 
 ## Quick Start
 
@@ -58,6 +62,7 @@ The script will configure everything and print client connection URLs at the end
 | `--hy2-bandwidth`  | no       | `100`        | Up/down Mbps for Hysteria2                    |
 | `--skip-hardening` | no       | —            | Skip server hardening phase                   |
 | `--skip-certbot`   | no       | —            | Skip TLS cert (uses self-signed)              |
+| `--skip-webui`     | no       | —            | Skip Web Admin UI installation                |
 | `--dry-run`        | no       | —            | Show config without executing                 |
 | `--show-urls`      | no       | —            | Show current client URLs from saved secrets   |
 
@@ -77,6 +82,43 @@ The script will configure everything and print client connection URLs at the end
 - **fail2ban** — brute-force protection
 - **unbound** — local DNS resolver
 - **acl** — filesystem ACL support
+- **jq** — JSON processing (for user management)
+- **python3** — Web Admin UI server
+
+## Web Admin UI
+
+The setup script installs a lightweight web panel for managing VPN users remotely — no SSH needed.
+
+**Access:** `https://your-domain:8443`
+
+Admin credentials (username `admin` + generated password) are printed at the end of setup.
+
+Features:
+
+- Add / remove VPN users
+- View connection URLs (VLESS, Hysteria2, Telegram SOCKS5)
+- QR codes for easy mobile setup
+- HTTPS with your Let's Encrypt certificate
+- Protected by fail2ban against brute-force
+
+Each user gets independent credentials for all three protocols. Adding or removing a user automatically updates the sing-box config and restarts the service.
+
+To skip Web UI installation, use `--skip-webui`.
+
+View admin password later:
+
+```bash
+# The password is shown during setup output.
+# The hash is stored in /etc/sing-box/.admin-password
+# To reset, re-run setup.sh (it will generate a new password).
+```
+
+Check Web UI status:
+
+```bash
+sudo systemctl status vpn-admin
+sudo journalctl -u vpn-admin -f
+```
 
 ## Client Apps
 
@@ -106,6 +148,7 @@ Check service status:
 
 ```bash
 sudo systemctl status sing-box
+sudo systemctl status vpn-admin
 sudo fail2ban-client status
 sudo ufw status
 ```
