@@ -44,21 +44,22 @@ The script will configure everything and print client connection URLs at the end
 
 ## Parameters
 
-| Parameter          | Required | Default          | Description                                   |
-| ------------------ | -------- | ---------------- | --------------------------------------------- |
-| `--domain`         | yes      | —                | Domain pointing to your server (for TLS cert) |
-| `--email`          | yes      | —                | Email for Let's Encrypt                       |
-| `--username`       | yes      | —                | Non-root user to create                       |
-| `--ssh-key`        | yes\*    | —                | SSH public key string                         |
-| `--ssh-key-file`   | yes\*    | —                | Path to SSH public key file                   |
-| `--reality-sni`    | no       | `www.google.com` | Domain to impersonate for Reality             |
-| `--socks-port`     | no       | `1081`           | SOCKS5 port                                   |
-| `--vless-port`     | no       | `10443`          | VLESS Reality port                            |
-| `--hy2-port`       | no       | `443`            | Hysteria2 UDP port                            |
-| `--hy2-bandwidth`  | no       | `100`            | Up/down Mbps for Hysteria2                    |
-| `--skip-hardening` | no       | —                | Skip server hardening phase                   |
-| `--skip-certbot`   | no       | —                | Skip TLS cert (uses self-signed)              |
-| `--dry-run`        | no       | —                | Show config without executing                 |
+| Parameter          | Required | Default      | Description                                   |
+| ------------------ | -------- | ------------ | --------------------------------------------- |
+| `--domain`         | yes      | —            | Domain pointing to your server (for TLS cert) |
+| `--email`          | yes      | —            | Email for Let's Encrypt                       |
+| `--username`       | yes      | —            | Non-root user to create                       |
+| `--ssh-key`        | yes\*    | —            | SSH public key string                         |
+| `--ssh-key-file`   | yes\*    | —            | Path to SSH public key file                   |
+| `--reality-sni`    | no       | `github.com` | Domain to impersonate for Reality             |
+| `--socks-port`     | no       | `1081`       | SOCKS5 port                                   |
+| `--vless-port`     | no       | `10443`      | VLESS Reality port                            |
+| `--hy2-port`       | no       | `443`        | Hysteria2 UDP port                            |
+| `--hy2-bandwidth`  | no       | `100`        | Up/down Mbps for Hysteria2                    |
+| `--skip-hardening` | no       | —            | Skip server hardening phase                   |
+| `--skip-certbot`   | no       | —            | Skip TLS cert (uses self-signed)              |
+| `--dry-run`        | no       | —            | Show config without executing                 |
+| `--show-urls`      | no       | —            | Show current client URLs from saved secrets   |
 
 \* Either `--ssh-key` or `--ssh-key-file` is required.
 
@@ -89,7 +90,13 @@ Import the generated URLs into:
 
 ## After Setup
 
-View credentials again:
+View client URLs:
+
+```bash
+sudo bash setup.sh --show-urls
+```
+
+View raw secrets:
 
 ```bash
 sudo cat /etc/sing-box/.secrets
