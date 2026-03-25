@@ -364,7 +364,7 @@ F2B_EOF
 setup_unbound() {
     log_step "Setting up unbound DNS resolver"
 
-    apt-get install -y curl unbound
+    apt-get install -y curl unbound dnsutils
 
     # Download root hints
     curl -sS -o /var/lib/unbound/root.hints https://www.internic.net/domain/named.root
@@ -426,8 +426,10 @@ UNBOUND_EOF
 configure_resolved() {
     log_step "Configuring systemd-resolved"
 
-    mkdir -p /etc/systemd/resolved.conf.d
-    cat > /etc/systemd/resolved.conf.d/local-dns.conf <<'RESOLVED_EOF'
+    # Only switch system DNS to unbound if it's actually resolving
+    if dig +short +time=2 google.com @127.0.0.1 >/dev/null 2>&1; then
+        mkdir -p /etc/systemd/resolved.conf.d
+        cat > /etc/systemd/resolved.conf.d/local-dns.conf <<'RESOLVED_EOF'
 [Resolve]
 DNS=127.0.0.1
 FallbackDNS=
@@ -436,16 +438,18 @@ DNSStubListener=no
 DNSOverTLS=no
 RESOLVED_EOF
 
-    systemctl restart systemd-resolved
+        systemctl restart systemd-resolved 2>/dev/null || true
 
-    # Fix resolv.conf symlink if needed
-    if ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf 2>/dev/null; then
-        log_ok "System DNS pointing to local unbound"
+        # Fix resolv.conf symlink if needed
+        if ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf 2>/dev/null; then
+            log_ok "System DNS pointing to local unbound"
+        else
+            log_warn "Could not update /etc/resolv.conf symlink, writing nameserver directly"
+            echo "nameserver 127.0.0.1" > /etc/resolv.conf 2>/dev/null || true
+            log_ok "System DNS configured"
+        fi
     else
-        # In containers, /etc/resolv.conf may be mounted and immutable
-        log_warn "Could not update /etc/resolv.conf (may be container-mounted), writing nameserver directly"
-        echo "nameserver 127.0.0.1" > /etc/resolv.conf 2>/dev/null || true
-        log_ok "System DNS configured"
+        log_warn "Unbound is not resolving, keeping current DNS config"
     fi
 }
 
